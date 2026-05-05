@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kumanyini Blocks | Admin Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500&family=JetBrains+Mono:wght@600&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../assets/css/main.css" />
+  <link rel="stylesheet" href="../assets/css/dashboard.css" />
+</head>
+<body class="dashboard-page">
+  <div id="authGate" class="login-wrap">
+    <div class="login-card">
+      <img src="../assets/images/logo.svg" alt="Kumanyini Blocks logo" width="52" height="52" />
+      <h1>Admin Access</h1>
+      <form id="loginForm">
+        <label for="adminPassword">Password</label>
+        <input id="adminPassword" type="password" required />
+        <p id="loginError" class="error-msg"></p>
+        <button class="btn btn--primary" type="submit">Login</button>
+      </form>
+    </div>
+  </div>
+
+  <div id="dashboardApp" hidden>
+    <div class="admin-shell">
+      <aside class="admin-sidebar">
+        <a class="brand" href="../index.html">
+          <img src="../assets/images/logo.svg" alt="Kumanyini Blocks logo" width="30" height="30" />
+          <span class="label">Kumanyini</span>
+        </a>
+        <nav class="admin-nav" aria-label="Dashboard sections">
+          <button class="is-active" data-panel="overviewPanel"><span class="label">Overview</span></button>
+          <button data-panel="quotesPanel"><span class="label">Quotes</span></button>
+          <button data-panel="messagesPanel"><span class="label">Messages</span></button>
+          <button data-panel="analyticsPanel"><span class="label">Product Analytics</span></button>
+          <button data-panel="settingsPanel"><span class="label">Settings</span></button>
+        </nav>
+        <button id="logoutBtn" class="btn btn--outline admin-logout">Logout</button>
+      </aside>
+
+      <main class="admin-main">
+        <div class="topbar">
+          <h2>Dashboard</h2>
+          <div class="topbar__actions">
+            <button class="btn btn--primary refresh-btn">Refresh Data</button>
+            <small id="lastUpdated">Last updated: just now</small>
+          </div>
+        </div>
+
+        <section id="overviewPanel" class="panel is-active">
+          <div class="kpi-grid">
+            <article class="kpi-card"><p>Total Visitors</p><p id="kpiVisitors" class="kpi-card__value">0</p></article>
+            <article class="kpi-card"><p>Quote Requests</p><p id="kpiQuotes" class="kpi-card__value">0</p></article>
+            <article class="kpi-card"><p>Messages</p><p id="kpiMessages" class="kpi-card__value">0</p></article>
+            <article class="kpi-card"><p>Pending Quotes</p><p id="kpiPending" class="kpi-card__value">0</p></article>
+          </div>
+          <div class="dashboard-chart"><canvas id="visitorsChart" aria-label="Visitor Activity Last 7 Days"></canvas></div>
+          <div class="table-wrap">
+            <table>
+              <caption>Daily Summary</caption>
+              <thead><tr><th scope="col">Date</th><th scope="col">Visitors</th><th scope="col">Quotes</th><th scope="col">Messages</th></tr></thead>
+              <tbody id="summaryTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="quotesPanel" class="panel">
+          <p><button id="exportQuotesBtn" class="btn btn--outline">Export CSV</button></p>
+          <div class="table-wrap">
+            <table>
+              <caption>Quote Requests</caption>
+              <thead><tr><th scope="col">Ref ID</th><th scope="col">Date</th><th scope="col">Name</th><th scope="col">Phone</th><th scope="col">Products</th><th scope="col">Delivery Location</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
+              <tbody id="quotesTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="messagesPanel" class="panel">
+          <div class="table-wrap">
+            <table>
+              <caption>Messages</caption>
+              <thead><tr><th scope="col">Date</th><th scope="col">Name</th><th scope="col">Phone</th><th scope="col">Email</th><th scope="col">Subject</th><th scope="col">Message</th><th scope="col">Read</th></tr></thead>
+              <tbody id="messagesTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="analyticsPanel" class="panel">
+          <div class="dashboard-chart"><canvas id="productsChart" aria-label="Product Views All Time"></canvas></div>
+        </section>
+
+        <section id="settingsPanel" class="panel">
+          <h3>Settings</h3>
+          <p><button id="clearCacheBtn" class="btn btn--outline">Clear Local Cache</button></p>
+          <p>Version 1.2.0 · Last updated 2026-05-05</p>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script defer src="../assets/js/main.js"></script>
+  <script defer src="../assets/js/dashboard.js"></script>
+</body>
+</html>
