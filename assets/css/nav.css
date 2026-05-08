@@ -17,7 +17,7 @@
   align-items: center;
 }
 .brand { display: flex; align-items: center; gap: 0.6rem; font-weight: 700; }
-.brand img { width: 34px; height: 34px; }
+.brand img { width: 44px; height: 44px; object-fit: contain; }
 .brand__name { font-family: var(--font-display); font-size: 1.1rem; }
 
 .nav-toggle { border: 0; background: transparent; color: var(--color-text); font-size: 1.5rem; }

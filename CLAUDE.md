@@ -165,17 +165,18 @@ All GAS calls go through this single centralized function. Never call `fetch()` 
 
 ```javascript
 async function gasRequest(action, payload = {}) {
-  const GAS_URL = localStorage.getItem('kb_gas_url') || '';
-  if (!GAS_URL) {
-    console.warn('GAS URL not configured. Using mock data.');
+  if (!GAS_WEB_APP_URL || GAS_WEB_APP_URL === 'YOUR_GAS_WEB_APP_URL_HERE') {
+    console.warn('GAS URL not configured in code. Using mock data.');
     return { success: false, mock: true };
   }
   try {
-    const res = await fetch(GAS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action, ...payload })
+    const params = new URLSearchParams();
+    params.set('action', action);
+    Object.entries(payload).forEach(([key, value]) => {
+      if (value === undefined || value === null) return;
+      params.set(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
     });
+    const res = await fetch(`${GAS_WEB_APP_URL}?${params.toString()}`, { method: 'GET' });
     return await res.json();
   } catch (err) {
     console.error(`GAS request [${action}] failed:`, err);
@@ -192,9 +193,11 @@ async function gasRequest(action, payload = {}) {
 | `submitQuote` | Submit a quote request | `name`, `phone`, `email`, `products[]`, `deliveryLocation`, `message` |
 | `submitContact` | Submit a contact message | `name`, `phone`, `email`, `subject`, `message` |
 | `logProductView` | Track a product card click | `product` (exact product name from catalogue) |
+| `adminLogin` | Validate admin password from Script Properties | `password` |
 | `getDashboardStats` | Fetch all dashboard data | _(none)_ |
 | `markMessageRead` | Mark a message as read | `rowIndex` |
 | `updateQuoteStatus` | Update a quote's status | `rowIndex`, `status` |
+| `setupSheets` | One-time create/repair required sheets + headers | _(run from editor)_ |
 
 ### 6.3 Google Sheets — Tab Names (exact, case-sensitive)
 
@@ -218,8 +221,9 @@ async function gasRequest(action, payload = {}) {
 
 - Auth check runs on every page load of `admin/dashboard.html`.
 - Token stored in `sessionStorage` as `kb_admin_auth`.
-- Password comparison uses SHA-256 via `window.crypto.subtle.digest`. Never store the plaintext password.
-- Default password hash is for `KBAdmin2024!` — document this in `README.md`.
+- Frontend sends password via `gasRequest('adminLogin', { password })`.
+- Validation happens in GAS (`Code.gs`) using Script Properties key `KB_ADMIN_PASSWORD`.
+- If `KB_ADMIN_PASSWORD` is not set, fallback default password is `KBAdmin2024!`.
 - On logout: `sessionStorage.clear()` then `location.reload()`.
 
 ### 7.2 Data Caching
@@ -232,7 +236,7 @@ async function gasRequest(action, payload = {}) {
 
 ### 7.3 Mock Data Fallback
 
-When GAS URL is not configured (`localStorage.getItem('kb_gas_url')` returns null), the dashboard must display `MOCK_STATS` (defined in `dashboard.js`) so it is always usable during development.
+When GAS URL is not configured in code (`GAS_WEB_APP_URL` placeholder value), the dashboard must display `MOCK_STATS` (defined in `dashboard.js`) so it is always usable during development.
 
 ### 7.4 Chart.js Usage
 
@@ -359,9 +363,10 @@ These are explicit prohibitions. If a user instruction conflicts with this list,
 - Do not install any npm packages or introduce a `package.json`.
 - Do not use any CSS framework (Tailwind, Bootstrap, Bulma, etc.).
 - Do not use any JS framework or library other than Chart.js (dashboard only).
-- Do not use `localStorage` for anything other than: `kb_gas_url` and `kb_stats_cache`.
+- Do not use `localStorage` for anything other than: `kb_stats_cache`.
 - Do not use `sessionStorage` for anything other than: `kb_admin_auth`.
-- Do not hardcode the GAS Web App URL in any frontend file — it must always be read from `localStorage.getItem('kb_gas_url')`.
+- GAS Web App URL is configured directly in `assets/js/main.js` (`GAS_WEB_APP_URL` constant).
+- Do not add any UI that saves or edits GAS URL at runtime.
 - Do not use `var` in JavaScript.
 - Do not write inline `style=""` or `onclick=""` attributes in HTML.
 - Do not add pages, sections, or features not in the project spec without explicit client approval.
@@ -383,25 +388,21 @@ These are explicit prohibitions. If a user instruction conflicts with this list,
 5. Add a `logVisit` call at the bottom of the page's `<script>` section (or it's already handled by `main.js`).
 
 ### Add a new GAS action
-1. Add the handler function in `Code.gs` inside the `doPost` switch statement.
+1. Add the handler function in `Code.gs` and register it in `routeAction_()`.
 2. Add the action name and payload shape to Section 6.2 of this file.
 3. Call it via `gasRequest('newAction', { ... })` in the appropriate JS file.
 
 ### Change the admin password
-1. In a browser console, run:
-   ```javascript
-   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('YourNewPassword'));
-   console.log([...new Uint8Array(buf)].map(b => b.toString(16).padStart(2,'0')).join(''));
-   ```
-2. Copy the output hash.
-3. Replace the `ADMIN_HASH` constant in `dashboard.js` with the new hash.
-4. Update `README.md` to document the new password (if stored securely).
+1. In Apps Script editor, open **Project Settings → Script properties**.
+2. Set key `KB_ADMIN_PASSWORD` to the new password value.
+3. Save, then redeploy web app if needed.
+4. Test login on `admin/dashboard.html`.
 
 ### Connect the live GAS backend
 1. Deploy `Code.gs` as a Web App in Apps Script (Execute as: Me, Access: Anyone).
 2. Copy the deployment URL.
-3. Open `admin/dashboard.html` in a browser → go to Settings panel → paste the URL → click Save.
-4. Click "Refresh Data" to verify the connection.
+3. Open `assets/js/main.js` and set `GAS_WEB_APP_URL` to the deployment URL.
+4. Refresh frontend pages and click "Refresh Data" in dashboard to verify.
 
 ---
 
@@ -424,9 +425,9 @@ Run through this before marking any milestone complete.
 - [ ] Quote status can be updated from the Quotes panel.
 - [ ] Messages can be marked as read from the Messages panel.
 - [ ] CSV export downloads correctly from the Quotes panel.
-- [ ] GAS URL can be set and saved from the Settings panel.
+- [ ] GAS URL is configured correctly in `assets/js/main.js`.
 - [ ] `README.md` setup instructions are accurate and complete.
-- [ ] No hardcoded GAS URLs anywhere in frontend files.
+- [ ] `KB_ADMIN_PASSWORD` is configured in Apps Script Script Properties.
 - [ ] All `console.log()` debug statements removed.
 - [ ] All images have `alt` text.
 - [ ] Site is fully usable on a 375px mobile screen.
