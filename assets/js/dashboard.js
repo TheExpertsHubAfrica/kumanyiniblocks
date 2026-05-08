@@ -52,7 +52,10 @@ function renderOverview(stats) {
   document.querySelector("#kpiMessages").textContent = stats.totalMessages;
   document.querySelector("#kpiPending").textContent = stats.pendingQuotes;
   const tbody = document.querySelector("#summaryTableBody");
-  tbody.innerHTML = stats.dailySummary.map((d, i) => `<tr class="${i === stats.dailySummary.length - 1 ? "latest-row" : ""}"><td>${d.date}</td><td>${d.visitors}</td><td>${d.quotes}</td><td>${d.messages}</td></tr>`).join("");
+  const summaryRows = stats.dailySummary || [];
+  tbody.innerHTML = summaryRows.length
+    ? summaryRows.map((d, i) => `<tr class="${i === summaryRows.length - 1 ? "latest-row" : ""}"><td>${d.date}</td><td>${d.visitors}</td><td>${d.quotes}</td><td>${d.messages}</td></tr>`).join("")
+    : '<tr><td colspan="4" class="table-empty">No summary data available yet.</td></tr>';
   if (visitorsChart) visitorsChart.destroy();
   visitorsChart = new Chart(document.querySelector("#visitorsChart"), {
     type: "line",
@@ -74,16 +77,33 @@ function renderProducts(stats) {
 function renderQuotes(stats) {
   const rows = stats.allQuotes || stats.recentQuotes || [];
   const tbody = document.querySelector("#quotesTableBody");
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="table-empty">No quote requests yet.</td></tr>';
+    return;
+  }
   tbody.innerHTML = rows.map((q) => {
     const status = q.status || "Pending";
     const map = { "Pending": "status-pending", "In Progress": "status-progress", "Fulfilled": "status-fulfilled", "Cancelled": "status-cancelled" };
-    return `<tr><td>${q.referenceId || ""}</td><td>${q.date || ""}</td><td>${q.name || ""}</td><td>${q.phone || ""}</td><td>${q.products || ""}</td><td>${q.deliveryLocation || ""}</td><td><span class="status-badge ${map[status] || "status-pending"}">${status}</span></td><td><select data-quote-row="${q.rowIndex || ""}"><option ${status === "Pending" ? "selected" : ""}>Pending</option><option ${status === "In Progress" ? "selected" : ""}>In Progress</option><option ${status === "Fulfilled" ? "selected" : ""}>Fulfilled</option><option ${status === "Cancelled" ? "selected" : ""}>Cancelled</option></select></td></tr>`;
+    let products = q.products || "";
+    try {
+      const parsed = typeof products === "string" ? JSON.parse(products) : products;
+      if (Array.isArray(parsed)) {
+        products = parsed.map((item) => `<span class="product-line">${item.type || "Product"} x${item.quantity || 0}</span>`).join("");
+      }
+    } catch (err) {
+      products = q.products || "";
+    }
+    return `<tr><td>${q.referenceId || ""}</td><td>${q.date || ""}</td><td>${q.name || ""}</td><td>${q.phone || ""}</td><td class="products-cell">${products}</td><td>${q.deliveryLocation || ""}</td><td><span class="status-badge ${map[status] || "status-pending"}">${status}</span></td><td><select data-quote-row="${q.rowIndex || ""}"><option ${status === "Pending" ? "selected" : ""}>Pending</option><option ${status === "In Progress" ? "selected" : ""}>In Progress</option><option ${status === "Fulfilled" ? "selected" : ""}>Fulfilled</option><option ${status === "Cancelled" ? "selected" : ""}>Cancelled</option></select></td></tr>`;
   }).join("");
 }
 
 function renderMessages(stats) {
   const rows = stats.allMessages || stats.recentMessages || [];
   const tbody = document.querySelector("#messagesTableBody");
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="table-empty">No messages yet.</td></tr>';
+    return;
+  }
   tbody.innerHTML = rows.map((m) => `<tr class="${m.read ? "" : "unread"}"><td>${m.date || ""}</td><td>${m.name || ""}</td><td>${m.phone || ""}</td><td>${m.email || ""}</td><td>${m.subject || ""}</td><td>${(m.message || "").slice(0, 60)}${(m.message || "").length > 60 ? "..." : ""}<br /><button class="btn btn--outline mark-read-btn" data-message-row="${m.rowIndex || ""}">Mark as Read</button></td><td>${m.read ? "Yes" : "No"}</td></tr>`).join("");
 }
 
