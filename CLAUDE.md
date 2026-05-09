@@ -197,6 +197,10 @@ async function gasRequest(action, payload = {}) {
 | `getDashboardStats` | Fetch all dashboard data | _(none)_ |
 | `markMessageRead` | Mark a message as read | `rowIndex` |
 | `updateQuoteStatus` | Update a quote's status | `rowIndex`, `status` |
+| `getInventory` | List stock rows | _(none)_ |
+| `addInventoryRow` | Create stock line | `operator`, `product`, `quantityOnHand`, `unit`, `yardLocation`, `reorderThreshold`, `notes`, optional `amountReceivedOnSale` |
+| `updateInventoryRow` | Update stock line | `rowIndex`, same fields as add |
+| `deleteInventoryRow` | Delete stock line | `rowIndex`, `operator` |
 | `setupSheets` | One-time create/repair required sheets + headers | _(run from editor)_ |
 
 ### 6.3 Google Sheets — Tab Names (exact, case-sensitive)
@@ -208,6 +212,8 @@ async function gasRequest(action, payload = {}) {
 | `messages` | Contact form submissions |
 | `product_views` | Product click events |
 | `summary` | Auto-computed daily aggregates |
+| `inventory` | Stock / inventory lines (CRUD from admin) |
+| `inventory_audit` | Append-only log of inventory changes (who, when, action, detail JSON) |
 
 ### 6.4 Quote Reference ID Format
 

@@ -3,8 +3,21 @@ const SHEETS = {
   quotes: "quotes",
   messages: "messages",
   productViews: "product_views",
-  summary: "summary"
+  summary: "summary",
+  inventory: "inventory",
+  inventoryAudit: "inventory_audit"
 };
+const INVENTORY_PRODUCTS = [
+  "5 Inch Hollow Block",
+  "5 Inch Solid Block",
+  "6 Inch Hollow Block",
+  "6 Inch Solid Block",
+  "4 Inch Hollow Block",
+  "4 Inch Solid Block",
+  "8 Inch Hollow Block",
+  "8 Inch Solid Block",
+  "Paving Block"
+];
 const DEFAULT_ADMIN_EMAIL = "kumanyiniconstructions@gmail.com";
 const DEFAULT_ADMIN_PASSWORD = "KBAdmin2024!";
 const SHEET_HEADERS = {};
@@ -13,6 +26,18 @@ SHEET_HEADERS[SHEETS.quotes] = ["Timestamp", "Name", "Phone", "Email", "Products
 SHEET_HEADERS[SHEETS.messages] = ["Timestamp", "Name", "Phone", "Email", "Subject", "Message", "Read"];
 SHEET_HEADERS[SHEETS.productViews] = ["Timestamp", "Product"];
 SHEET_HEADERS[SHEETS.summary] = ["Date", "Visitors", "Quotes", "Messages"];
+SHEET_HEADERS[SHEETS.inventory] = [
+  "Product",
+  "QuantityOnHand",
+  "Unit",
+  "YardLocation",
+  "ReorderThreshold",
+  "Notes",
+  "AmountReceivedOnSale",
+  "UpdatedAt",
+  "UpdatedBy"
+];
+SHEET_HEADERS[SHEETS.inventoryAudit] = ["Timestamp", "Operator", "Action", "RowIndex", "Product", "Detail"];
 
 function doGet(e) {
   try {
@@ -48,6 +73,10 @@ function routeAction_(action, payload) {
     case "getDashboardStats": return handleGetDashboardStats_();
     case "markMessageRead": return handleMarkMessageRead_(payload);
     case "updateQuoteStatus": return handleUpdateQuoteStatus_(payload);
+    case "getInventory": return handleGetInventory_();
+    case "addInventoryRow": return handleAddInventoryRow_(payload);
+    case "updateInventoryRow": return handleUpdateInventoryRow_(payload);
+    case "deleteInventoryRow": return handleDeleteInventoryRow_(payload);
     default: return { success: false, error: "Unknown action." };
   }
 }
@@ -279,4 +308,166 @@ function getAdminEmail_() {
 function getAdminPassword_() {
   const configuredPassword = PropertiesService.getScriptProperties().getProperty("KB_ADMIN_PASSWORD");
   return configuredPassword || DEFAULT_ADMIN_PASSWORD;
+}
+
+function validateInventoryProduct_(name) {
+  const n = String(name || "").trim();
+  if (INVENTORY_PRODUCTS.indexOf(n) === -1) {
+    throw new Error("Invalid product name.");
+  }
+  return n;
+}
+
+function normalizeQty_(v) {
+  const n = Number(v);
+  if (isNaN(n) || n < 0) return 0;
+  return Math.min(Math.floor(n), 999999);
+}
+
+function normalizeInventoryAmount_(v) {
+  if (v === undefined || v === null || v === "") return "";
+  const n = Number(v);
+  if (isNaN(n) || n < 0) return "";
+  return n;
+}
+
+function snapshotFromInventoryRow_(row) {
+  const d = row[7];
+  let updatedAt = "";
+  if (d instanceof Date) {
+    updatedAt = Utilities.formatDate(d, "GMT", "yyyy-MM-dd HH:mm") + " UTC";
+  } else if (d) {
+    updatedAt = String(d);
+  }
+  return {
+    product: row[0],
+    quantityOnHand: row[1],
+    unit: row[2],
+    yardLocation: row[3],
+    reorderThreshold: row[4],
+    notes: row[5],
+    amountReceivedOnSale: row[6],
+    updatedAt: updatedAt,
+    updatedBy: row[8] || ""
+  };
+}
+
+function logInventoryAudit_(operator, action, rowIndex, product, detailObj) {
+  const sheet = getSheet_(SHEETS.inventoryAudit);
+  sheet.appendRow([
+    new Date(),
+    String(operator || "Admin"),
+    action,
+    rowIndex,
+    String(product || ""),
+    JSON.stringify(detailObj || {})
+  ]);
+}
+
+function handleGetInventory_() {
+  try {
+    const sheet = getSheet_(SHEETS.inventory);
+    if (!sheet) return { success: false, error: "Inventory sheet missing. Run setupSheets in the script editor." };
+    const data = sheet.getDataRange().getValues();
+    const rows = [];
+    for (var i = 1; i < data.length; i++) {
+      const line = data[i];
+      if (line.every(function (c) { return c === ""; })) continue;
+      rows.push({
+        rowIndex: i + 1,
+        product: line[0],
+        quantityOnHand: line[1],
+        unit: line[2],
+        yardLocation: line[3],
+        reorderThreshold: line[4],
+        notes: line[5],
+        amountReceivedOnSale: line[6],
+        updatedAt: snapshotFromInventoryRow_(line).updatedAt,
+        updatedBy: line[8] || ""
+      });
+    }
+    return { success: true, inventory: rows };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+function handleAddInventoryRow_(payload) {
+  let newRowIndex = 0;
+  try {
+    const product = validateInventoryProduct_(payload.product);
+    const operator = String(payload.operator || "").trim() || "Admin";
+    const qty = normalizeQty_(payload.quantityOnHand);
+    const reorder = normalizeQty_(payload.reorderThreshold);
+    const amount = normalizeInventoryAmount_(payload.amountReceivedOnSale);
+    const unit = String(payload.unit || "").trim().slice(0, 80);
+    const yard = String(payload.yardLocation || "").trim().slice(0, 120);
+    const notes = String(payload.notes || "").trim().slice(0, 2000);
+    withLock_(function () {
+      const sheet = getSheet_(SHEETS.inventory);
+      const now = new Date();
+      const row = [product, qty, unit, yard, reorder, notes, amount, now, operator];
+      sheet.appendRow(row);
+      newRowIndex = sheet.getLastRow();
+      logInventoryAudit_(operator, "CREATE", newRowIndex, product, { after: snapshotFromInventoryRow_(row) });
+    });
+    return { success: true, rowIndex: newRowIndex };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+function handleUpdateInventoryRow_(payload) {
+  const row = Number(payload.rowIndex || 0);
+  if (row < 2) return { success: false, error: "Invalid row index." };
+  try {
+    const product = validateInventoryProduct_(payload.product);
+    const operator = String(payload.operator || "").trim() || "Admin";
+    const qty = normalizeQty_(payload.quantityOnHand);
+    const reorder = normalizeQty_(payload.reorderThreshold);
+    const amount = normalizeInventoryAmount_(payload.amountReceivedOnSale);
+    const unit = String(payload.unit || "").trim().slice(0, 80);
+    const yard = String(payload.yardLocation || "").trim().slice(0, 120);
+    const notes = String(payload.notes || "").trim().slice(0, 2000);
+    withLock_(function () {
+      const sheet = getSheet_(SHEETS.inventory);
+      const last = sheet.getLastRow();
+      if (row > last) throw new Error("Row not found.");
+      const oldVals = sheet.getRange(row, 1, 1, 9).getValues()[0];
+      if (oldVals.every(function (c) { return c === ""; })) throw new Error("Row not found.");
+      const before = snapshotFromInventoryRow_(oldVals);
+      const now = new Date();
+      const newRow = [product, qty, unit, yard, reorder, notes, amount, now, operator];
+      sheet.getRange(row, 1, 1, 9).setValues([newRow]);
+      logInventoryAudit_(operator, "UPDATE", row, product, {
+        before: before,
+        after: snapshotFromInventoryRow_(newRow)
+      });
+    });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+function handleDeleteInventoryRow_(payload) {
+  const row = Number(payload.rowIndex || 0);
+  if (row < 2) return { success: false, error: "Invalid row index." };
+  try {
+    const operator = String(payload.operator || "").trim() || "Admin";
+    withLock_(function () {
+      const sheet = getSheet_(SHEETS.inventory);
+      const last = sheet.getLastRow();
+      if (row > last) throw new Error("Row not found.");
+      const oldVals = sheet.getRange(row, 1, 1, 9).getValues()[0];
+      if (oldVals.every(function (c) { return c === ""; })) throw new Error("Row not found.");
+      const before = snapshotFromInventoryRow_(oldVals);
+      const product = String(oldVals[0] || "");
+      sheet.deleteRow(row);
+      logInventoryAudit_(operator, "DELETE", row, product, { before: before });
+    });
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 }

@@ -35,6 +35,7 @@
           <button class="is-active" data-panel="overviewPanel"><span class="label">Overview</span></button>
           <button data-panel="quotesPanel"><span class="label">Quotes</span></button>
           <button data-panel="messagesPanel"><span class="label">Messages</span></button>
+          <button data-panel="inventoryPanel"><span class="label">Inventory</span></button>
           <button data-panel="analyticsPanel"><span class="label">Product Analytics</span></button>
           <button data-panel="settingsPanel"><span class="label">Settings</span></button>
         </nav>
@@ -92,12 +93,107 @@
           <div class="dashboard-chart"><canvas id="productsChart" aria-label="Product Views All Time"></canvas></div>
         </section>
 
+        <section id="inventoryPanel" class="panel">
+          <div class="inventory-toolbar no-print">
+            <div class="inventory-toolbar__row">
+              <p class="inventory-toolbar__actions">
+                <button type="button" id="exportInventoryCsvBtn" class="btn btn--outline">Export CSV</button>
+                <button type="button" id="printInventoryBtn" class="btn btn--outline">Print / Save as PDF</button>
+              </p>
+              <p class="inventory-operator-field">
+                <label for="inventoryOperator">Changes recorded as</label>
+                <input id="inventoryOperator" class="inventory-operator-input" type="text" maxlength="80" value="Admin" autocomplete="name" />
+              </p>
+            </div>
+          </div>
+          <p id="inventoryPanelMessage" class="inventory-panel-message" role="status"></p>
+
+          <div class="inventory-print-banner print-only" aria-hidden="true">
+            <h1 class="inventory-print-title">Kumanyini Blocks — Stock</h1>
+            <p id="inventoryPrintDate" class="inventory-print-meta"></p>
+          </div>
+
+          <div class="inventory-form-card no-print">
+            <h3 id="inventoryFormHeading">Add stock line</h3>
+            <form id="inventoryForm" class="inventory-form">
+              <input type="hidden" id="inventoryEditRowIndex" value="" />
+              <div class="inventory-form__grid">
+                <p class="inventory-field">
+                  <label for="inventoryProduct">Product</label>
+                  <select id="inventoryProduct" required></select>
+                </p>
+                <p class="inventory-field">
+                  <label for="inventoryQuantity">Quantity on hand</label>
+                  <input id="inventoryQuantity" type="number" min="0" max="999999" step="1" required value="0" />
+                </p>
+                <p class="inventory-field">
+                  <label for="inventoryUnit">Unit</label>
+                  <input id="inventoryUnit" type="text" maxlength="80" placeholder="e.g. pieces, pallets" />
+                </p>
+                <p class="inventory-field">
+                  <label for="inventoryYard">Yard location</label>
+                  <input id="inventoryYard" type="text" maxlength="120" />
+                </p>
+                <p class="inventory-field">
+                  <label for="inventoryReorder">Reorder threshold</label>
+                  <input id="inventoryReorder" type="number" min="0" max="999999" step="1" value="0" />
+                </p>
+                <p class="inventory-field">
+                  <label for="inventoryAmountSale">Amount received on sale (GHS)</label>
+                  <input id="inventoryAmountSale" type="number" min="0" step="0.01" />
+                </p>
+                <p class="inventory-field inventory-field--full">
+                  <label for="inventoryNotes">Notes</label>
+                  <textarea id="inventoryNotes" maxlength="400" rows="3"></textarea>
+                </p>
+              </div>
+              <p class="inventory-form__actions">
+                <button type="submit" class="btn btn--primary" id="inventorySubmitBtn">Save line</button>
+                <button type="button" class="btn btn--outline" id="inventoryCancelEditBtn" hidden>Cancel edit</button>
+              </p>
+            </form>
+          </div>
+
+          <div class="table-wrap inventory-table-wrap">
+            <table>
+              <caption>Stock on hand</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Product</th>
+                  <th scope="col">Qty</th>
+                  <th scope="col">Unit</th>
+                  <th scope="col">Yard</th>
+                  <th scope="col">Reorder</th>
+                  <th scope="col">Sale (GHS)</th>
+                  <th scope="col">Notes</th>
+                  <th scope="col">Updated</th>
+                  <th scope="col">By</th>
+                  <th scope="col" class="no-print">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="inventoryTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+
         <section id="settingsPanel" class="panel">
           <h3>Settings</h3>
           <p><button id="clearCacheBtn" class="btn btn--outline">Clear Local Cache</button></p>
           <p>Version 1.2.0 · Last updated 2026-05-05</p>
         </section>
       </main>
+    </div>
+  </div>
+
+  <div id="inventoryDeleteDialog" class="inventory-dialog" hidden>
+    <div class="inventory-dialog__backdrop" data-inventory-delete-dismiss></div>
+    <div class="inventory-dialog__box" role="dialog" aria-modal="true" aria-labelledby="inventoryDeleteTitle">
+      <h3 id="inventoryDeleteTitle">Delete this stock line?</h3>
+      <p id="inventoryDeleteSummary" class="inventory-dialog__summary"></p>
+      <div class="inventory-dialog__actions">
+        <button type="button" class="btn btn--outline" id="inventoryDeleteCancelBtn">Cancel</button>
+        <button type="button" class="btn btn--primary inventory-dialog__danger" id="inventoryDeleteConfirmBtn">Delete</button>
+      </div>
     </div>
   </div>
 

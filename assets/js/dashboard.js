@@ -15,6 +15,325 @@ const MOCK_STATS = {
   recentMessages: []
 };
 
+const INVENTORY_PRODUCTS = [
+  "5 Inch Hollow Block", "5 Inch Solid Block", "6 Inch Hollow Block", "6 Inch Solid Block",
+  "4 Inch Hollow Block", "4 Inch Solid Block", "8 Inch Hollow Block", "8 Inch Solid Block", "Paving Block"
+];
+
+const MOCK_INVENTORY = {
+  inventory: [
+    {
+      rowIndex: 2,
+      product: "5 Inch Hollow Block",
+      quantityOnHand: 1200,
+      unit: "pieces",
+      yardLocation: "Bay A",
+      reorderThreshold: 400,
+      notes: "Example row (mock — connect GAS)",
+      amountReceivedOnSale: 1250.5,
+      updatedAt: "2026-05-01 10:00 UTC",
+      updatedBy: "Admin"
+    }
+  ]
+};
+
+let inventoryCache = { inventory: [] };
+
+function setRefreshLoading(isLoading) {
+  document.querySelectorAll(".refresh-btn").forEach((btn) => {
+    if (isLoading) {
+      if (!btn.dataset.idleLabel) btn.dataset.idleLabel = btn.textContent;
+      btn.classList.add("is-loading");
+      btn.disabled = true;
+      btn.setAttribute("aria-busy", "true");
+      btn.textContent = "Refreshing…";
+    } else {
+      btn.classList.remove("is-loading");
+      btn.disabled = false;
+      btn.removeAttribute("aria-busy");
+      if (btn.dataset.idleLabel) btn.textContent = btn.dataset.idleLabel;
+    }
+  });
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text == null ? "" : String(text);
+  return div.innerHTML;
+}
+
+function getInventoryOperator() {
+  const el = document.querySelector("#inventoryOperator");
+  const v = el?.value?.trim();
+  return v || "Admin";
+}
+
+function setInventoryMessage(text, isError = false) {
+  const el = document.querySelector("#inventoryPanelMessage");
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("is-error", Boolean(isError && text));
+}
+
+function fillInventoryProductSelect() {
+  const sel = document.querySelector("#inventoryProduct");
+  if (!sel) return;
+  sel.innerHTML = INVENTORY_PRODUCTS.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
+}
+
+function resetInventoryForm() {
+  const form = document.querySelector("#inventoryForm");
+  if (!form) return;
+  form.reset();
+  document.querySelector("#inventoryEditRowIndex").value = "";
+  document.querySelector("#inventoryFormHeading").textContent = "Add stock line";
+  const submitBtn = document.querySelector("#inventorySubmitBtn");
+  if (submitBtn) submitBtn.textContent = "Save line";
+  document.querySelector("#inventoryCancelEditBtn").hidden = true;
+  fillInventoryProductSelect();
+}
+
+function readInventoryFormPayload() {
+  const amountRaw = document.querySelector("#inventoryAmountSale").value.trim();
+  const payload = {
+    operator: getInventoryOperator(),
+    product: document.querySelector("#inventoryProduct").value,
+    quantityOnHand: Number(document.querySelector("#inventoryQuantity").value),
+    unit: document.querySelector("#inventoryUnit").value.trim(),
+    yardLocation: document.querySelector("#inventoryYard").value.trim(),
+    reorderThreshold: Number(document.querySelector("#inventoryReorder").value),
+    notes: document.querySelector("#inventoryNotes").value.trim()
+  };
+  if (amountRaw !== "") payload.amountReceivedOnSale = Number(amountRaw);
+  return payload;
+}
+
+function renderInventoryTable() {
+  const tbody = document.querySelector("#inventoryTableBody");
+  if (!tbody) return;
+  const rows = inventoryCache.inventory || [];
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="10" class="table-empty">No stock lines yet. Add one above or connect Google Sheets.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map((r) => {
+    const notesShort = (r.notes || "").length > 80 ? `${escapeHtml((r.notes || "").slice(0, 80))}…` : escapeHtml(r.notes || "");
+    const sale = r.amountReceivedOnSale === "" || r.amountReceivedOnSale == null ? "—" : escapeHtml(String(r.amountReceivedOnSale));
+    return `<tr>
+      <td>${escapeHtml(r.product || "")}</td>
+      <td>${escapeHtml(String(r.quantityOnHand ?? ""))}</td>
+      <td>${escapeHtml(r.unit || "—")}</td>
+      <td>${escapeHtml(r.yardLocation || "—")}</td>
+      <td>${escapeHtml(String(r.reorderThreshold ?? ""))}</td>
+      <td>${sale}</td>
+      <td title="${escapeHtml(r.notes || "")}">${notesShort || "—"}</td>
+      <td>${escapeHtml(r.updatedAt || "")}</td>
+      <td>${escapeHtml(r.updatedBy || "")}</td>
+      <td class="no-print">
+        <button type="button" class="btn btn--outline inventory-edit-btn" data-inventory-row="${r.rowIndex}">Edit</button>
+        <button type="button" class="btn btn--outline inventory-delete-btn" data-inventory-row="${r.rowIndex}">Delete</button>
+      </td>
+    </tr>`;
+  }).join("");
+}
+
+async function loadInventory(options = {}) {
+  const { showPlaceholder = true } = options;
+  const panel = document.querySelector("#inventoryPanel");
+  panel?.classList.add("is-fetching");
+  try {
+    if (showPlaceholder) {
+      const tbody = document.querySelector("#inventoryTableBody");
+      if (tbody) tbody.innerHTML = '<tr><td colspan="10" class="table-empty">Loading inventory…</td></tr>';
+    }
+    setInventoryMessage("");
+    const res = await gasRequest("getInventory", {});
+    if (res.success && Array.isArray(res.inventory)) {
+      inventoryCache = { inventory: res.inventory };
+    } else if (res.mock) {
+      inventoryCache = { inventory: MOCK_INVENTORY.inventory.map((r) => ({ ...r })) };
+      setInventoryMessage("GAS URL not configured — showing mock inventory.", false);
+    } else {
+      inventoryCache = { inventory: [] };
+      setInventoryMessage(res.error || "Could not load inventory.", true);
+    }
+    renderInventoryTable();
+  } finally {
+    panel?.classList.remove("is-fetching");
+  }
+}
+
+function openInventoryDeleteDialog(rowIndex) {
+  const row = (inventoryCache.inventory || []).find((r) => r.rowIndex === rowIndex);
+  const dialog = document.querySelector("#inventoryDeleteDialog");
+  const summary = document.querySelector("#inventoryDeleteSummary");
+  if (!dialog || !summary) return;
+  summary.textContent = row
+    ? `Remove ${row.product} (row ${rowIndex}, qty ${row.quantityOnHand})?`
+    : `Remove row ${rowIndex}?`;
+  dialog.dataset.pendingRow = String(rowIndex);
+  dialog.hidden = false;
+  document.querySelector("#inventoryDeleteCancelBtn")?.focus();
+}
+
+function closeInventoryDeleteDialog() {
+  const dialog = document.querySelector("#inventoryDeleteDialog");
+  if (dialog) {
+    dialog.hidden = true;
+    delete dialog.dataset.pendingRow;
+  }
+}
+
+function setupInventoryPanel() {
+  fillInventoryProductSelect();
+  document.querySelector("#inventoryForm")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const submitBtn = document.querySelector("#inventorySubmitBtn");
+    const payload = readInventoryFormPayload();
+    if (!INVENTORY_PRODUCTS.includes(payload.product)) {
+      setInventoryMessage("Choose a valid product from the list.", true);
+      return;
+    }
+    if (Number.isNaN(payload.quantityOnHand) || payload.quantityOnHand < 0) {
+      setInventoryMessage("Quantity on hand must be a valid number.", true);
+      return;
+    }
+    const cancelBtn = document.querySelector("#inventoryCancelEditBtn");
+    if (cancelBtn) cancelBtn.disabled = true;
+    submitBtn.disabled = true;
+    submitBtn.classList.add("is-loading");
+    submitBtn.setAttribute("aria-busy", "true");
+    submitBtn.textContent = "Saving…";
+    setInventoryMessage("");
+    try {
+      const editRow = document.querySelector("#inventoryEditRowIndex").value;
+      const res = editRow
+        ? await gasRequest("updateInventoryRow", { ...payload, rowIndex: Number(editRow) })
+        : await gasRequest("addInventoryRow", payload);
+      if (res.success) {
+        resetInventoryForm();
+        await loadInventory({ showPlaceholder: false });
+        setInventoryMessage(editRow ? "Line updated." : "Line added.");
+      } else if (res.mock) {
+        setInventoryMessage("GAS not configured — cannot save.", true);
+      } else {
+        setInventoryMessage(res.error || "Save failed.", true);
+      }
+    } catch (err) {
+      setInventoryMessage("Save failed.", true);
+    } finally {
+      if (cancelBtn) cancelBtn.disabled = false;
+      submitBtn.disabled = false;
+      submitBtn.classList.remove("is-loading");
+      submitBtn.removeAttribute("aria-busy");
+      const stillEditing = Boolean(document.querySelector("#inventoryEditRowIndex").value);
+      submitBtn.textContent = stillEditing ? "Update line" : "Save line";
+    }
+  });
+
+  document.querySelector("#inventoryCancelEditBtn")?.addEventListener("click", () => {
+    resetInventoryForm();
+    setInventoryMessage("");
+  });
+
+  document.querySelector("#inventoryTableBody")?.addEventListener("click", (event) => {
+    const t = event.target;
+    if (t.matches(".inventory-edit-btn")) {
+      const rowIndex = Number(t.dataset.inventoryRow);
+      const row = (inventoryCache.inventory || []).find((r) => r.rowIndex === rowIndex);
+      if (!row) return;
+      document.querySelector("#inventoryEditRowIndex").value = String(row.rowIndex);
+      document.querySelector("#inventoryFormHeading").textContent = "Edit stock line";
+      document.querySelector("#inventorySubmitBtn").textContent = "Update line";
+      document.querySelector("#inventoryCancelEditBtn").hidden = false;
+      document.querySelector("#inventoryProduct").value = row.product;
+      document.querySelector("#inventoryQuantity").value = row.quantityOnHand ?? 0;
+      document.querySelector("#inventoryUnit").value = row.unit || "";
+      document.querySelector("#inventoryYard").value = row.yardLocation || "";
+      document.querySelector("#inventoryReorder").value = row.reorderThreshold ?? 0;
+      document.querySelector("#inventoryNotes").value = row.notes || "";
+      const sale = row.amountReceivedOnSale;
+      document.querySelector("#inventoryAmountSale").value =
+        sale === "" || sale == null ? "" : String(sale);
+      document.querySelector("#inventoryForm")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      setInventoryMessage("");
+    }
+    if (t.matches(".inventory-delete-btn")) {
+      openInventoryDeleteDialog(Number(t.dataset.inventoryRow));
+    }
+  });
+
+  document.querySelector("#inventoryDeleteCancelBtn")?.addEventListener("click", closeInventoryDeleteDialog);
+  document.querySelector("#inventoryDeleteDialog")?.querySelectorAll("[data-inventory-delete-dismiss]").forEach((el) => {
+    el.addEventListener("click", closeInventoryDeleteDialog);
+  });
+
+  document.querySelector("#inventoryDeleteConfirmBtn")?.addEventListener("click", async () => {
+    const dialog = document.querySelector("#inventoryDeleteDialog");
+    const rowIndex = Number(dialog?.dataset.pendingRow);
+    if (!rowIndex) return;
+    const btn = document.querySelector("#inventoryDeleteConfirmBtn");
+    const idleDeleteLabel = btn.textContent;
+    btn.disabled = true;
+    btn.classList.add("is-loading");
+    btn.setAttribute("aria-busy", "true");
+    btn.textContent = "Deleting…";
+    try {
+      const res = await gasRequest("deleteInventoryRow", { rowIndex, operator: getInventoryOperator() });
+      closeInventoryDeleteDialog();
+      if (res.success) {
+        resetInventoryForm();
+        await loadInventory({ showPlaceholder: false });
+        setInventoryMessage("Line deleted.");
+      } else if (res.mock) {
+        setInventoryMessage("GAS not configured — cannot delete.", true);
+      } else {
+        setInventoryMessage(res.error || "Delete failed.", true);
+      }
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove("is-loading");
+      btn.removeAttribute("aria-busy");
+      btn.textContent = idleDeleteLabel;
+    }
+  });
+
+  document.querySelector("#exportInventoryCsvBtn")?.addEventListener("click", () => {
+    const rows = inventoryCache.inventory || [];
+    const header = "Product,QuantityOnHand,Unit,YardLocation,ReorderThreshold,AmountReceivedOnSale,Notes,UpdatedAt,UpdatedBy,SheetRow";
+    const lines = rows.map((r) => {
+      const cells = [
+        r.product, r.quantityOnHand, r.unit, r.yardLocation, r.reorderThreshold,
+        r.amountReceivedOnSale, r.notes, r.updatedAt, r.updatedBy, r.rowIndex
+      ];
+      return cells.map((c) => `"${String(c ?? "").replaceAll('"', '""')}"`).join(",");
+    });
+    const csv = [header, ...lines].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "inventory.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  document.querySelector("#printInventoryBtn")?.addEventListener("click", () => {
+    const el = document.querySelector("#inventoryPrintDate");
+    if (el) el.textContent = `Generated ${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC`;
+    const endPrint = () => document.body.classList.remove("print-stock-only");
+    document.body.classList.add("print-stock-only");
+    window.addEventListener("afterprint", endPrint, { once: true });
+    window.print();
+  });
+
+  document.addEventListener("keydown", (e) => {
+    const dialog = document.querySelector("#inventoryDeleteDialog");
+    if (!dialog || dialog.hidden || e.key !== "Escape") return;
+    closeInventoryDeleteDialog();
+  });
+}
+
 function setupAuth() {
   const gate = document.querySelector("#authGate");
   const app = document.querySelector("#dashboardApp");
@@ -24,11 +343,21 @@ function setupAuth() {
   document.querySelector("#loginForm")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     const input = document.querySelector("#adminPassword");
+    const loginBtn = document.querySelector('#loginForm button[type="submit"]');
+    const idleLabel = loginBtn.textContent;
+    loginBtn.classList.add("is-loading");
+    loginBtn.disabled = true;
+    loginBtn.setAttribute("aria-busy", "true");
+    loginBtn.textContent = "Signing in…";
     const response = await gasRequest("adminLogin", { password: input.value });
     if (response.success) {
       sessionStorage.setItem("kb_admin_auth", "true");
       gate.hidden = true; app.hidden = false; initDashboard();
     } else {
+      loginBtn.classList.remove("is-loading");
+      loginBtn.disabled = false;
+      loginBtn.removeAttribute("aria-busy");
+      loginBtn.textContent = idleLabel;
       document.querySelector(".login-card")?.classList.add("shake");
       const message = response.mock ? "Set GAS URL in assets/js/main.js first." : "Incorrect password.";
       document.querySelector("#loginError").textContent = message;
@@ -121,17 +450,35 @@ function setupPanels() {
 
 function setupSettings() {
   document.querySelector("#clearCacheBtn")?.addEventListener("click", () => {
+    const btn = document.querySelector("#clearCacheBtn");
+    const idle = btn.textContent;
+    btn.classList.add("is-loading");
+    btn.disabled = true;
+    btn.setAttribute("aria-busy", "true");
+    btn.textContent = "Clearing…";
     localStorage.removeItem(CACHE_KEY);
     const note = document.querySelector("#settingsNote");
     if (note) note.textContent = "Local cache cleared. Use Refresh Data to fetch new values.";
+    requestAnimationFrame(() => {
+      btn.classList.remove("is-loading");
+      btn.disabled = false;
+      btn.removeAttribute("aria-busy");
+      btn.textContent = idle;
+    });
   });
 }
 
 function setupRefresh() {
   document.querySelectorAll(".refresh-btn").forEach((btn) => btn.addEventListener("click", async () => {
-    const stats = await getStats(true);
-    renderOverview(stats); renderProducts(stats); renderQuotes(stats); renderMessages(stats);
-    document.querySelector("#lastUpdated").textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+    setRefreshLoading(true);
+    try {
+      const stats = await getStats(true);
+      renderOverview(stats); renderProducts(stats); renderQuotes(stats); renderMessages(stats);
+      await loadInventory({ showPlaceholder: true });
+      document.querySelector("#lastUpdated").textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+    } finally {
+      setRefreshLoading(false);
+    }
   }));
 }
 
@@ -151,14 +498,48 @@ function setupRowActions() {
   document.querySelector("#quotesTableBody")?.addEventListener("change", async (event) => {
     const target = event.target;
     if (!target.matches("select[data-quote-row]")) return;
-    await gasRequest("updateQuoteStatus", { rowIndex: Number(target.dataset.quoteRow), status: target.value });
+    const status = target.value;
+    const rowIndex = Number(target.dataset.quoteRow);
+    target.disabled = true;
+    target.classList.add("is-loading");
+    target.setAttribute("aria-busy", "true");
+    try {
+      const res = await gasRequest("updateQuoteStatus", { rowIndex, status });
+      if (!res.success) {
+        const stats = await getStats(true);
+        renderQuotes(stats);
+      }
+    } finally {
+      target.disabled = false;
+      target.classList.remove("is-loading");
+      target.removeAttribute("aria-busy");
+    }
   });
   document.querySelector("#messagesTableBody")?.addEventListener("click", async (event) => {
     const target = event.target;
     if (!target.matches(".mark-read-btn")) return;
-    await gasRequest("markMessageRead", { rowIndex: Number(target.dataset.messageRow) });
-    target.closest("tr")?.classList.remove("unread");
-    target.remove();
+    const idle = target.textContent;
+    target.disabled = true;
+    target.classList.add("is-loading");
+    target.setAttribute("aria-busy", "true");
+    target.textContent = "Updating…";
+    try {
+      const res = await gasRequest("markMessageRead", { rowIndex: Number(target.dataset.messageRow) });
+      if (res.success) {
+        target.closest("tr")?.classList.remove("unread");
+        target.remove();
+      } else {
+        target.disabled = false;
+        target.classList.remove("is-loading");
+        target.removeAttribute("aria-busy");
+        target.textContent = idle;
+      }
+    } catch (err) {
+      target.disabled = false;
+      target.classList.remove("is-loading");
+      target.removeAttribute("aria-busy");
+      target.textContent = idle;
+    }
   });
 }
 
@@ -168,8 +549,15 @@ async function initDashboard() {
   setupRefresh();
   setupCSVExport();
   setupRowActions();
-  const stats = await getStats();
-  renderOverview(stats); renderProducts(stats); renderQuotes(stats); renderMessages(stats);
+  setupInventoryPanel();
+  setRefreshLoading(true);
+  try {
+    const stats = await getStats();
+    renderOverview(stats); renderProducts(stats); renderQuotes(stats); renderMessages(stats);
+    await loadInventory({ showPlaceholder: true });
+  } finally {
+    setRefreshLoading(false);
+  }
 }
 
 document.addEventListener("DOMContentLoaded", setupAuth);
