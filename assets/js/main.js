@@ -1,5 +1,5 @@
 const WHATSAPP_URL = "https://wa.me/233550203197?text=Hello%2C%20I%27d%20like%20to%20enquire%20about%20your%20blocks.";
-const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzaeFQGWZIirPpWtWLWaLXmM8Y88243I4vm9j_FDhFCkTV9JwfMdcOqlv1CQp_waCXGkA/exec";
+const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwIiJEICXgV-0DLOkpY2vNNhgrE73pOyvUn2qaACQl0WtLuaKLbm69ztiG6VwNWJ9pxPQ/exec";
 
 async function gasRequest(action, payload = {}) {
   if (!GAS_WEB_APP_URL || GAS_WEB_APP_URL === "YOUR_GAS_WEB_APP_URL_HERE") return { success: false, mock: true };

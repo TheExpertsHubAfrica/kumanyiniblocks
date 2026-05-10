@@ -98,8 +98,20 @@ tr.unread { font-weight: 700; border-left: 4px solid var(--color-primary); }
 .login-wrap { min-height: 100vh; display: grid; place-items: center; background: var(--color-surface); }
 .login-card { width: min(420px, 92vw); padding: 1.6rem; background: var(--color-white); border: 1px solid var(--color-border); border-radius: var(--radius-lg); }
 .login-card.shake { animation: shake 0.3s; }
+.login-card form > label {
+  display: block;
+  margin-top: 0.85rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+.login-card form > label:first-of-type { margin-top: 0; }
 .topbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 1.35rem; flex-wrap: wrap; }
+.topbar__lead { flex: 1; min-width: 0; }
+.topbar__lead h2 { margin: 0 0 0.25rem; }
+.topbar__session { margin: 0; font-size: 0.88rem; color: var(--color-text-muted); font-family: var(--font-body); }
 .topbar__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem; }
+.admin-activity-action { font-size: 0.82rem; font-family: var(--font-mono); }
+.admin-activity-detail { max-width: 320px; font-size: 0.82rem; word-break: break-word; }
 .dashboard-chart { background: var(--color-white); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 1rem; margin-top: 1rem; }
 .dashboard-chart canvas { width: 100% !important; height: auto !important; min-height: 260px; }
 .admin-logout { margin-top: auto; margin-bottom: 0.55rem; }
@@ -141,6 +153,13 @@ select[data-quote-row] { min-width: 132px; }
   padding: 1rem 1.1rem;
 }
 .inventory-form-card h3 { margin: 0 0 0.75rem; font-family: var(--font-display); font-size: 1.15rem; }
+.sales-panel-hint {
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  max-width: 52rem;
+}
 .inventory-form__grid {
   display: grid;
   gap: 0.75rem 1rem;
@@ -204,6 +223,17 @@ select[data-quote-row] { min-width: 132px; }
   opacity: 0.72;
 }
 
+.inventory-actions-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+}
+.inventory-actions-cell .btn {
+  flex: 0 0 auto;
+}
+
 .print-only { display: none; }
 
 @media print {
@@ -212,33 +242,46 @@ select[data-quote-row] { min-width: 132px; }
   body.print-stock-only .topbar,
   body.print-stock-only .panel:not(#inventoryPanel),
   body.print-stock-only .no-print,
-  body.print-stock-only .inventory-dialog {
+  body.print-stock-only .inventory-dialog,
+  body.print-sales-only .admin-sidebar,
+  body.print-sales-only .topbar,
+  body.print-sales-only .panel:not(#salesPanel),
+  body.print-sales-only .no-print,
+  body.print-sales-only .inventory-dialog {
     display: none !important;
   }
-  body.print-stock-only .admin-main {
+  body.print-stock-only .admin-main,
+  body.print-sales-only .admin-main {
     margin-left: 0;
     padding: 0.5rem;
   }
-  body.print-stock-only #inventoryPanel {
+  body.print-stock-only #inventoryPanel,
+  body.print-sales-only #salesPanel {
     display: block !important;
   }
-  body.print-stock-only .inventory-print-title {
+  body.print-stock-only .inventory-print-title,
+  body.print-sales-only .inventory-print-title {
     font-family: var(--font-display);
     font-size: 1.35rem;
     margin: 0 0 0.25rem;
   }
-  body.print-stock-only .inventory-print-meta {
+  body.print-stock-only .inventory-print-meta,
+  body.print-sales-only .inventory-print-meta {
     margin: 0 0 1rem;
     font-size: 0.9rem;
     color: var(--color-text);
   }
-  body.print-stock-only .table-wrap {
+  body.print-stock-only .table-wrap,
+  body.print-sales-only .table-wrap {
     border: 0;
     box-shadow: none;
   }
-  body.print-stock-only table { min-width: 0; }
+  body.print-stock-only table,
+  body.print-sales-only table { min-width: 0; }
   body.print-stock-only th,
-  body.print-stock-only td { font-size: 0.82rem; padding: 0.4rem; }
+  body.print-stock-only td,
+  body.print-sales-only th,
+  body.print-sales-only td { font-size: 0.82rem; padding: 0.4rem; }
 }
 
 @keyframes shake { 0%,100%{transform:translateX(0);}25%{transform:translateX(-8px);}75%{transform:translateX(8px);} }

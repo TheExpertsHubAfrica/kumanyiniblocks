@@ -16,8 +16,10 @@
       <img src="../assets/images/kumanyina-blocks-logo.png" alt="Kumanyini Blocks logo" width="64" height="64" />
       <h1>Admin Access</h1>
       <form id="loginForm">
+        <label for="adminEmail">Email</label>
+        <input id="adminEmail" type="email" name="email" autocomplete="username" required />
         <label for="adminPassword">Password</label>
-        <input id="adminPassword" type="password" required />
+        <input id="adminPassword" type="password" name="password" autocomplete="current-password" required />
         <p id="loginError" class="error-msg"></p>
         <button class="btn btn--primary" type="submit">Login</button>
       </form>
@@ -36,6 +38,9 @@
           <button data-panel="quotesPanel"><span class="label">Quotes</span></button>
           <button data-panel="messagesPanel"><span class="label">Messages</span></button>
           <button data-panel="inventoryPanel"><span class="label">Inventory</span></button>
+          <button data-panel="salesPanel"><span class="label">Sales</span></button>
+          <button data-panel="adminActivityPanel"><span class="label">Activity</span></button>
+          <button type="button" data-panel="inventoryAuditPanel" class="admin-nav--super-only" hidden><span class="label">Inventory audit</span></button>
           <button data-panel="analyticsPanel"><span class="label">Product Analytics</span></button>
           <button data-panel="settingsPanel"><span class="label">Settings</span></button>
         </nav>
@@ -44,7 +49,10 @@
 
       <main class="admin-main">
         <div class="topbar">
-          <h2>Dashboard</h2>
+          <div class="topbar__lead">
+            <h2>Dashboard</h2>
+            <p id="adminSessionLabel" class="topbar__session" aria-live="polite"></p>
+          </div>
           <div class="topbar__actions">
             <button class="btn btn--primary refresh-btn">Refresh Data</button>
             <small id="lastUpdated">Last updated: just now</small>
@@ -100,10 +108,6 @@
                 <button type="button" id="exportInventoryCsvBtn" class="btn btn--outline">Export CSV</button>
                 <button type="button" id="printInventoryBtn" class="btn btn--outline">Print / Save as PDF</button>
               </p>
-              <p class="inventory-operator-field">
-                <label for="inventoryOperator">Changes recorded as</label>
-                <input id="inventoryOperator" class="inventory-operator-input" type="text" maxlength="80" value="Admin" autocomplete="name" />
-              </p>
             </div>
           </div>
           <p id="inventoryPanelMessage" class="inventory-panel-message" role="status"></p>
@@ -138,10 +142,6 @@
                   <label for="inventoryReorder">Reorder threshold</label>
                   <input id="inventoryReorder" type="number" min="0" max="999999" step="1" value="0" />
                 </p>
-                <p class="inventory-field">
-                  <label for="inventoryAmountSale">Amount received on sale (GHS)</label>
-                  <input id="inventoryAmountSale" type="number" min="0" step="0.01" />
-                </p>
                 <p class="inventory-field inventory-field--full">
                   <label for="inventoryNotes">Notes</label>
                   <textarea id="inventoryNotes" maxlength="400" rows="3"></textarea>
@@ -164,7 +164,6 @@
                   <th scope="col">Unit</th>
                   <th scope="col">Yard</th>
                   <th scope="col">Reorder</th>
-                  <th scope="col">Sale (GHS)</th>
                   <th scope="col">Notes</th>
                   <th scope="col">Updated</th>
                   <th scope="col">By</th>
@@ -172,6 +171,103 @@
                 </tr>
               </thead>
               <tbody id="inventoryTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="salesPanel" class="panel">
+          <p id="salesPanelMessage" class="inventory-panel-message" role="status"></p>
+
+          <div class="inventory-print-banner print-only" aria-hidden="true">
+            <h1 class="inventory-print-title">Kumanyini Blocks — Sales</h1>
+            <p id="salesPrintDate" class="inventory-print-meta"></p>
+          </div>
+
+          <div class="inventory-form-card no-print">
+            <h3>Record a sale</h3>
+            <p class="sales-panel-hint">Recording a sale subtracts the quantity from the first available stock lines for that product (yard order: top to bottom in the sheet).</p>
+            <form id="salesForm" class="inventory-form">
+              <div class="inventory-form__grid">
+                <p class="inventory-field">
+                  <label for="salesProduct">Product</label>
+                  <select id="salesProduct" required></select>
+                </p>
+                <p class="inventory-field">
+                  <label for="salesQuantity">Quantity sold</label>
+                  <input id="salesQuantity" type="number" min="1" max="999999" step="1" required value="1" />
+                </p>
+                <p class="inventory-field">
+                  <label for="salesAmountGHS">Amount (GHS)</label>
+                  <input id="salesAmountGHS" type="number" min="0" step="0.01" />
+                </p>
+                <p class="inventory-field inventory-field--full">
+                  <label for="salesNotes">Notes</label>
+                  <textarea id="salesNotes" maxlength="400" rows="2"></textarea>
+                </p>
+              </div>
+              <p class="inventory-form__actions">
+                <button type="submit" class="btn btn--primary" id="salesSubmitBtn">Record sale</button>
+              </p>
+            </form>
+          </div>
+          <p class="inventory-toolbar__actions no-print">
+            <button type="button" id="exportSalesCsvBtn" class="btn btn--outline">Export CSV</button>
+            <button type="button" id="printSalesBtn" class="btn btn--outline">Print / Save as PDF</button>
+          </p>
+          <div class="table-wrap">
+            <table>
+              <caption>Recent sales</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Date</th>
+                  <th scope="col">Recorded as</th>
+                  <th scope="col">Product</th>
+                  <th scope="col">Qty</th>
+                  <th scope="col">Amount (GHS)</th>
+                  <th scope="col">Notes</th>
+                </tr>
+              </thead>
+              <tbody id="salesTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="adminActivityPanel" class="panel">
+          <p id="adminActivityMessage" class="inventory-panel-message" role="status"></p>
+          <div class="table-wrap">
+            <table>
+              <caption>Admin activity log</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Time</th>
+                  <th scope="col">Email</th>
+                  <th scope="col">Name</th>
+                  <th scope="col">Role</th>
+                  <th scope="col">Action</th>
+                  <th scope="col">Detail</th>
+                </tr>
+              </thead>
+              <tbody id="adminActivityTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="inventoryAuditPanel" class="panel">
+          <p id="inventoryAuditMessage" class="inventory-panel-message" role="status"></p>
+          <div class="table-wrap">
+            <table>
+              <caption>Inventory sheet audit (row-level changes)</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Time</th>
+                  <th scope="col">Operator</th>
+                  <th scope="col">Action</th>
+                  <th scope="col">Row</th>
+                  <th scope="col">Product</th>
+                  <th scope="col">Detail</th>
+                </tr>
+              </thead>
+              <tbody id="inventoryAuditTableBody"></tbody>
             </table>
           </div>
         </section>

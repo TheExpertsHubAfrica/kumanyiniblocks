@@ -27,7 +27,7 @@ These are fixed. Do not suggest alternatives. Do not introduce new dependencies 
 |---|---|
 | Frontend | HTML5, CSS3 (custom properties only), Vanilla JavaScript ES6+ |
 | Backend | Google Apps Script (GAS), deployed as a Web App |
-| Data Store | Google Sheets (5 tabs: `visitors`, `quotes`, `messages`, `product_views`, `summary`) |
+| Data Store | Google Sheets (core tabs: `visitors`, `quotes`, `messages`, `product_views`, `summary`; plus `inventory`, `inventory_audit`, `sales`, `admin_users`, `admin_activity`) |
 | Charts | Chart.js via CDN (dashboard only) |
 | Fonts | Google Fonts — Playfair Display, DM Sans, JetBrains Mono |
 | Build Tool | None — zero build step, pure static files |
@@ -52,7 +52,7 @@ kumanyini-blocks/
 ├── CLAUDE.md                  ← this file
 ├── README.md
 ├── admin/
-│   └── dashboard.html
+│   └── index.html               ← admin dashboard (login + panels)
 ├── assets/
 │   ├── css/
 │   │   ├── main.css           ← global styles, CSS variables, reset
@@ -193,15 +193,19 @@ async function gasRequest(action, payload = {}) {
 | `submitQuote` | Submit a quote request | `name`, `phone`, `email`, `products[]`, `deliveryLocation`, `message` |
 | `submitContact` | Submit a contact message | `name`, `phone`, `email`, `subject`, `message` |
 | `logProductView` | Track a product card click | `product` (exact product name from catalogue) |
-| `adminLogin` | Validate admin password from Script Properties | `password` |
+| `adminLogin` | Validate admin email + password against `admin_users` tab | `email`, `password` — returns `{ user: { email, displayName, role } }` on success |
 | `getDashboardStats` | Fetch all dashboard data | _(none)_ |
-| `markMessageRead` | Mark a message as read | `rowIndex` |
-| `updateQuoteStatus` | Update a quote's status | `rowIndex`, `status` |
-| `getInventory` | List stock rows | _(none)_ |
-| `addInventoryRow` | Create stock line | `operator`, `product`, `quantityOnHand`, `unit`, `yardLocation`, `reorderThreshold`, `notes`, optional `amountReceivedOnSale` |
-| `updateInventoryRow` | Update stock line | `rowIndex`, same fields as add |
-| `deleteInventoryRow` | Delete stock line | `rowIndex`, `operator` |
-| `setupSheets` | One-time create/repair required sheets + headers | _(run from editor)_ |
+| `markMessageRead` | Mark a message as read | `rowIndex`, plus **`actorEmail`**, **`actorDisplayName`**, **`actorRole`** (sent by dashboard) |
+| `updateQuoteStatus` | Update a quote's status | `rowIndex`, `status`, plus actor fields |
+| `getInventory` | List stock rows | actor fields _(optional for read)_ |
+| `addInventoryRow` | Create stock line | `product`, `quantityOnHand`, `unit`, `yardLocation`, `reorderThreshold`, `notes`, plus actor fields — **UpdatedBy** uses display name or email |
+| `updateInventoryRow` | Update stock line | `rowIndex`, same fields as add, plus actor fields |
+| `deleteInventoryRow` | Delete stock line | `rowIndex`, plus actor fields |
+| `getSales` | List recent sales (newest first, capped) | actor fields |
+| `recordSale` | Log a sale and deduct stock (FIFO by sheet row) | `product`, `quantitySold`, optional `amountGHS`, `notes`, plus actor fields |
+| `getAdminActivity` | Read `admin_activity` log (newest first, capped) | **`actorEmail`** required (active user) |
+| `getInventoryAudit` | Read `inventory_audit` log | **`actorEmail`** required; **`super_admin` role only** |
+| `setupSheets` | One-time create/repair required sheets + headers; seeds default admin if `admin_users` is empty | _(run from editor)_ |
 
 ### 6.3 Google Sheets — Tab Names (exact, case-sensitive)
 
@@ -212,8 +216,11 @@ async function gasRequest(action, payload = {}) {
 | `messages` | Contact form submissions |
 | `product_views` | Product click events |
 | `summary` | Auto-computed daily aggregates |
-| `inventory` | Stock / inventory lines (CRUD from admin) |
+| `inventory` | Stock lines — **8 columns only**: Product, QuantityOnHand, Unit, YardLocation, ReorderThreshold, Notes, UpdatedAt, UpdatedBy |
 | `inventory_audit` | Append-only log of inventory changes (who, when, action, detail JSON) |
+| `sales` | Sales records; each successful `recordSale` appends a row and reduces `inventory` quantities |
+| `admin_users` | Admin accounts: Email, Password (plain text per client setup), Active, DisplayName, CreatedAt, Role (`super_admin` or `admin`) |
+| `admin_activity` | Dashboard action audit: Timestamp, Email, DisplayName, Role, Action, Detail (JSON string) |
 
 ### 6.4 Quote Reference ID Format
 
@@ -225,12 +232,14 @@ async function gasRequest(action, payload = {}) {
 
 ### 7.1 Authentication
 
-- Auth check runs on every page load of `admin/dashboard.html`.
-- Token stored in `sessionStorage` as `kb_admin_auth`.
-- Frontend sends password via `gasRequest('adminLogin', { password })`.
-- Validation happens in GAS (`Code.gs`) using Script Properties key `KB_ADMIN_PASSWORD`.
-- If `KB_ADMIN_PASSWORD` is not set, fallback default password is `KBAdmin2024!`.
-- On logout: `sessionStorage.clear()` then `location.reload()`.
+- Auth check runs on every page load of `admin/index.html`.
+- Session stored in `sessionStorage` as **`kb_admin_session`**: JSON object `{ email, displayName, role }` returned from GAS after successful login.
+- Login form: **`gasRequest('adminLogin', { email, password })`**. Credentials are validated in GAS against the **`admin_users`** sheet (plain-text password column as configured).
+- If the `admin_users` sheet is missing or has no data rows, login **fails** with a clear error instructing the operator to run **`setupSheets`** in the Apps Script editor (no Script Properties password fallback).
+- Default seed user (only when `setupSheets` runs on an empty `admin_users`): email **`kumanyiniconstructions@gmail.com`**, password **`KBAdmin2024!`**, display name **Kumanyini Admin**, role **`super_admin`**.
+- **Inventory audit** nav panel: visible only when `role === 'super_admin'`. **Activity** log panel: all authenticated admins.
+- All authenticated dashboard mutations use **`adminGasRequest()`** in `dashboard.js`, which merges **`actorEmail`**, **`actorDisplayName`**, and **`actorRole`** into the payload (except `adminLogin`, which uses raw `gasRequest`).
+- On logout: remove `kb_admin_session` (and legacy `kb_admin_auth` if present), then `location.reload()`.
 
 ### 7.2 Data Caching
 
@@ -246,7 +255,7 @@ When GAS URL is not configured in code (`GAS_WEB_APP_URL` placeholder value), th
 
 ### 7.4 Chart.js Usage
 
-- Load Chart.js from CDN **only on `dashboard.html`** — not on public pages.
+- Load Chart.js from CDN **only on `admin/index.html`** — not on public pages.
 - CDN URL: `https://cdn.jsdelivr.net/npm/chart.js`
 - Two charts: (1) visitor trend — line chart, (2) product views — horizontal bar chart.
 - Always destroy an existing chart instance before re-rendering: `if (chartRef) chartRef.destroy();`
@@ -304,7 +313,7 @@ Do not alter phone numbers, email addresses, or location details.
 | About | `about.html` | About Us | `about.html` |
 | Gallery | `gallery.html` | Gallery | `gallery.html` |
 | Contact | `contact.html` | Contact | `contact.html` |
-| Admin | `admin/dashboard.html` | (footer only) | — |
+| Admin | `admin/index.html` | (footer only) | — |
 
 The "Get a Quote" button in the navbar always links to `contact.html#quote-tab`.
 
@@ -370,7 +379,7 @@ These are explicit prohibitions. If a user instruction conflicts with this list,
 - Do not use any CSS framework (Tailwind, Bootstrap, Bulma, etc.).
 - Do not use any JS framework or library other than Chart.js (dashboard only).
 - Do not use `localStorage` for anything other than: `kb_stats_cache`.
-- Do not use `sessionStorage` for anything other than: `kb_admin_auth`.
+- Do not use `sessionStorage` for anything other than: `kb_admin_session` (and removal of legacy `kb_admin_auth` on logout if present).
 - GAS Web App URL is configured directly in `assets/js/main.js` (`GAS_WEB_APP_URL` constant).
 - Do not add any UI that saves or edits GAS URL at runtime.
 - Do not use `var` in JavaScript.
@@ -380,7 +389,7 @@ These are explicit prohibitions. If a user instruction conflicts with this list,
 - Do not alter contact details (phone, email, address).
 - Do not use `alert()` or `confirm()` for any user-facing interaction.
 - Do not use any external image CDN for product images — use local SVG placeholders.
-- Do not load Chart.js on public-facing pages — only on `admin/dashboard.html`.
+- Do not load Chart.js on public-facing pages — only on `admin/index.html`.
 
 ---
 
@@ -398,11 +407,11 @@ These are explicit prohibitions. If a user instruction conflicts with this list,
 2. Add the action name and payload shape to Section 6.2 of this file.
 3. Call it via `gasRequest('newAction', { ... })` in the appropriate JS file.
 
-### Change the admin password
-1. In Apps Script editor, open **Project Settings → Script properties**.
-2. Set key `KB_ADMIN_PASSWORD` to the new password value.
-3. Save, then redeploy web app if needed.
-4. Test login on `admin/dashboard.html`.
+### Change an admin password or role
+1. Open the spreadsheet bound to the Apps Script project.
+2. Edit the **`admin_users`** tab: update the **Password** and/or **Role** cell for that email (or add a new row with `Active` = TRUE).
+3. Redeploy the web app if you changed script code; sheet-only edits do not require redeploy.
+4. Test login on `admin/index.html`.
 
 ### Connect the live GAS backend
 1. Deploy `Code.gs` as a Web App in Apps Script (Execute as: Me, Access: Anyone).
@@ -425,7 +434,8 @@ Run through this before marking any milestone complete.
 - [ ] Product filter buttons show/hide cards correctly.
 - [ ] Quote cart accumulates products and passes them to the contact page.
 - [ ] Gallery lightbox works with keyboard navigation (←, →, Escape).
-- [ ] Admin login gate works; wrong password shows error; correct password shows dashboard.
+- [ ] Admin login gate works with email + password; wrong credentials show a clear error; success stores `kb_admin_session` and shows dashboard.
+- [ ] Run **`setupSheets`** once so `admin_users` / `admin_activity` exist; default super admin can sign in.
 - [ ] Dashboard KPI cards display mock data when GAS is not connected.
 - [ ] Both Chart.js charts render without errors.
 - [ ] Quote status can be updated from the Quotes panel.
@@ -433,7 +443,7 @@ Run through this before marking any milestone complete.
 - [ ] CSV export downloads correctly from the Quotes panel.
 - [ ] GAS URL is configured correctly in `assets/js/main.js`.
 - [ ] `README.md` setup instructions are accurate and complete.
-- [ ] `KB_ADMIN_PASSWORD` is configured in Apps Script Script Properties.
+- [ ] **Activity** and (for `super_admin`) **Inventory audit** panels load from GAS without errors.
 - [ ] All `console.log()` debug statements removed.
 - [ ] All images have `alt` text.
 - [ ] Site is fully usable on a 375px mobile screen.

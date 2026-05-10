@@ -30,14 +30,87 @@ const MOCK_INVENTORY = {
       yardLocation: "Bay A",
       reorderThreshold: 400,
       notes: "Example row (mock — connect GAS)",
-      amountReceivedOnSale: 1250.5,
       updatedAt: "2026-05-01 10:00 UTC",
       updatedBy: "Admin"
     }
   ]
 };
 
+const MOCK_SALES = {
+  sales: []
+};
+
 let inventoryCache = { inventory: [] };
+let salesCache = { sales: [] };
+let adminActivityCache = [];
+let inventoryAuditCache = [];
+
+const ADMIN_SESSION_KEY = "kb_admin_session";
+
+function getAdminSession() {
+  try {
+    const raw = sessionStorage.getItem(ADMIN_SESSION_KEY);
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    if (!s || !s.email) return null;
+    return {
+      email: String(s.email),
+      displayName: String(s.displayName || ""),
+      role: String(s.role || "admin")
+    };
+  } catch {
+    return null;
+  }
+}
+
+function setAdminSession(user) {
+  sessionStorage.setItem(
+    ADMIN_SESSION_KEY,
+    JSON.stringify({
+      email: user.email,
+      displayName: user.displayName || "",
+      role: user.role || "admin"
+    })
+  );
+}
+
+function clearAdminSession() {
+  sessionStorage.removeItem(ADMIN_SESSION_KEY);
+  sessionStorage.removeItem("kb_admin_auth");
+}
+
+async function adminGasRequest(action, payload = {}) {
+  const session = getAdminSession();
+  if (!session) {
+    return { success: false, error: "Session expired. Log in again." };
+  }
+  return gasRequest(action, {
+    ...payload,
+    actorEmail: session.email,
+    actorDisplayName: session.displayName,
+    actorRole: session.role
+  });
+}
+
+function updateTopbarUserLabel() {
+  const el = document.querySelector("#adminSessionLabel");
+  const session = getAdminSession();
+  if (!el) return;
+  if (!session) {
+    el.textContent = "";
+    return;
+  }
+  const label = session.displayName || session.email;
+  el.textContent = `Signed in as ${label} · ${session.role}`;
+}
+
+function applyAdminNavVisibility() {
+  const session = getAdminSession();
+  const auditNav = document.querySelector('[data-panel="inventoryAuditPanel"]');
+  if (!auditNav) return;
+  const isSuper = session && String(session.role).toLowerCase() === "super_admin";
+  auditNav.hidden = !isSuper;
+}
 
 function setRefreshLoading(isLoading) {
   document.querySelectorAll(".refresh-btn").forEach((btn) => {
@@ -60,12 +133,6 @@ function escapeHtml(text) {
   const div = document.createElement("div");
   div.textContent = text == null ? "" : String(text);
   return div.innerHTML;
-}
-
-function getInventoryOperator() {
-  const el = document.querySelector("#inventoryOperator");
-  const v = el?.value?.trim();
-  return v || "Admin";
 }
 
 function setInventoryMessage(text, isError = false) {
@@ -94,9 +161,7 @@ function resetInventoryForm() {
 }
 
 function readInventoryFormPayload() {
-  const amountRaw = document.querySelector("#inventoryAmountSale").value.trim();
-  const payload = {
-    operator: getInventoryOperator(),
+  return {
     product: document.querySelector("#inventoryProduct").value,
     quantityOnHand: Number(document.querySelector("#inventoryQuantity").value),
     unit: document.querySelector("#inventoryUnit").value.trim(),
@@ -104,8 +169,6 @@ function readInventoryFormPayload() {
     reorderThreshold: Number(document.querySelector("#inventoryReorder").value),
     notes: document.querySelector("#inventoryNotes").value.trim()
   };
-  if (amountRaw !== "") payload.amountReceivedOnSale = Number(amountRaw);
-  return payload;
 }
 
 function renderInventoryTable() {
@@ -113,23 +176,21 @@ function renderInventoryTable() {
   if (!tbody) return;
   const rows = inventoryCache.inventory || [];
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="10" class="table-empty">No stock lines yet. Add one above or connect Google Sheets.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="table-empty">No stock lines yet. Add one above or connect Google Sheets.</td></tr>';
     return;
   }
   tbody.innerHTML = rows.map((r) => {
     const notesShort = (r.notes || "").length > 80 ? `${escapeHtml((r.notes || "").slice(0, 80))}…` : escapeHtml(r.notes || "");
-    const sale = r.amountReceivedOnSale === "" || r.amountReceivedOnSale == null ? "—" : escapeHtml(String(r.amountReceivedOnSale));
     return `<tr>
       <td>${escapeHtml(r.product || "")}</td>
       <td>${escapeHtml(String(r.quantityOnHand ?? ""))}</td>
       <td>${escapeHtml(r.unit || "—")}</td>
       <td>${escapeHtml(r.yardLocation || "—")}</td>
       <td>${escapeHtml(String(r.reorderThreshold ?? ""))}</td>
-      <td>${sale}</td>
       <td title="${escapeHtml(r.notes || "")}">${notesShort || "—"}</td>
       <td>${escapeHtml(r.updatedAt || "")}</td>
       <td>${escapeHtml(r.updatedBy || "")}</td>
-      <td class="no-print">
+      <td class="no-print inventory-actions-cell">
         <button type="button" class="btn btn--outline inventory-edit-btn" data-inventory-row="${r.rowIndex}">Edit</button>
         <button type="button" class="btn btn--outline inventory-delete-btn" data-inventory-row="${r.rowIndex}">Delete</button>
       </td>
@@ -144,10 +205,10 @@ async function loadInventory(options = {}) {
   try {
     if (showPlaceholder) {
       const tbody = document.querySelector("#inventoryTableBody");
-      if (tbody) tbody.innerHTML = '<tr><td colspan="10" class="table-empty">Loading inventory…</td></tr>';
+      if (tbody) tbody.innerHTML = '<tr><td colspan="9" class="table-empty">Loading inventory…</td></tr>';
     }
     setInventoryMessage("");
-    const res = await gasRequest("getInventory", {});
+    const res = await adminGasRequest("getInventory", {});
     if (res.success && Array.isArray(res.inventory)) {
       inventoryCache = { inventory: res.inventory };
     } else if (res.mock) {
@@ -161,6 +222,260 @@ async function loadInventory(options = {}) {
   } finally {
     panel?.classList.remove("is-fetching");
   }
+}
+
+function setSalesMessage(text, isError = false) {
+  const el = document.querySelector("#salesPanelMessage");
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("is-error", Boolean(isError && text));
+}
+
+function fillSalesProductSelect() {
+  const sel = document.querySelector("#salesProduct");
+  if (!sel) return;
+  sel.innerHTML = INVENTORY_PRODUCTS.map((p) => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
+}
+
+function readSalesFormPayload() {
+  const amountRaw = document.querySelector("#salesAmountGHS").value.trim();
+  const payload = {
+    product: document.querySelector("#salesProduct").value,
+    quantitySold: Number(document.querySelector("#salesQuantity").value),
+    notes: document.querySelector("#salesNotes").value.trim()
+  };
+  if (amountRaw !== "") payload.amountGHS = Number(amountRaw);
+  return payload;
+}
+
+function renderSalesTable() {
+  const tbody = document.querySelector("#salesTableBody");
+  if (!tbody) return;
+  const rows = salesCache.sales || [];
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="table-empty">No sales recorded yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map((s) => {
+    const amt = s.amountGHS === "" || s.amountGHS == null ? "—" : escapeHtml(String(s.amountGHS));
+    const notesShort = (s.notes || "").length > 60 ? `${escapeHtml((s.notes || "").slice(0, 60))}…` : escapeHtml(s.notes || "");
+    return `<tr>
+      <td>${escapeHtml(s.date || "")}</td>
+      <td>${escapeHtml(s.operator || "")}</td>
+      <td>${escapeHtml(s.product || "")}</td>
+      <td>${escapeHtml(String(s.quantitySold ?? ""))}</td>
+      <td>${amt}</td>
+      <td title="${escapeHtml(s.notes || "")}">${notesShort || "—"}</td>
+    </tr>`;
+  }).join("");
+}
+
+async function loadSales(options = {}) {
+  const { showPlaceholder = true } = options;
+  if (showPlaceholder) {
+    const tbody = document.querySelector("#salesTableBody");
+    if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="table-empty">Loading sales…</td></tr>';
+  }
+  setSalesMessage("");
+  const res = await adminGasRequest("getSales", {});
+  if (res.success && Array.isArray(res.sales)) {
+    salesCache = { sales: res.sales };
+  } else if (res.mock) {
+    salesCache = { sales: MOCK_SALES.sales.slice() };
+    setSalesMessage("GAS URL not configured — sales list is offline.", false);
+  } else {
+    salesCache = { sales: [] };
+    setSalesMessage(res.error || "Could not load sales.", true);
+  }
+  renderSalesTable();
+}
+
+function setAdminActivityMessage(text, isError = false) {
+  const el = document.querySelector("#adminActivityMessage");
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("is-error", Boolean(isError && text));
+}
+
+function renderAdminActivityTable() {
+  const tbody = document.querySelector("#adminActivityTableBody");
+  if (!tbody) return;
+  const rows = adminActivityCache || [];
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="table-empty">No activity recorded yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map((r) => {
+    const detailRaw = r.detail == null ? "" : String(r.detail);
+    const detailShort = detailRaw.length > 120 ? `${escapeHtml(detailRaw.slice(0, 120))}…` : escapeHtml(detailRaw);
+    return `<tr>
+      <td>${escapeHtml(r.timestamp || "")}</td>
+      <td>${escapeHtml(r.email || "")}</td>
+      <td>${escapeHtml(r.displayName || "")}</td>
+      <td>${escapeHtml(r.role || "")}</td>
+      <td><code class="admin-activity-action">${escapeHtml(r.action || "")}</code></td>
+      <td class="admin-activity-detail" title="${escapeHtml(detailRaw)}">${detailShort || "—"}</td>
+    </tr>`;
+  }).join("");
+}
+
+async function loadAdminActivity(options = {}) {
+  const { showPlaceholder = true } = options;
+  const panel = document.querySelector("#adminActivityPanel");
+  panel?.classList.add("is-fetching");
+  try {
+    if (showPlaceholder) {
+      const tbody = document.querySelector("#adminActivityTableBody");
+      if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="table-empty">Loading activity…</td></tr>';
+    }
+    setAdminActivityMessage("");
+    const res = await adminGasRequest("getAdminActivity", {});
+    if (res.success && Array.isArray(res.activities)) {
+      adminActivityCache = res.activities;
+    } else if (res.mock) {
+      adminActivityCache = [];
+      setAdminActivityMessage("GAS URL not configured — activity log unavailable offline.", false);
+    } else {
+      adminActivityCache = [];
+      setAdminActivityMessage(res.error || "Could not load admin activity.", true);
+    }
+    renderAdminActivityTable();
+  } finally {
+    panel?.classList.remove("is-fetching");
+  }
+}
+
+function setInventoryAuditMessage(text, isError = false) {
+  const el = document.querySelector("#inventoryAuditMessage");
+  if (!el) return;
+  el.textContent = text || "";
+  el.classList.toggle("is-error", Boolean(isError && text));
+}
+
+function renderInventoryAuditTable() {
+  const tbody = document.querySelector("#inventoryAuditTableBody");
+  if (!tbody) return;
+  const rows = inventoryAuditCache || [];
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="table-empty">No inventory audit entries yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map((r) => {
+    const detailRaw = r.detail == null ? "" : String(r.detail);
+    const detailShort = detailRaw.length > 120 ? `${escapeHtml(detailRaw.slice(0, 120))}…` : escapeHtml(detailRaw);
+    return `<tr>
+      <td>${escapeHtml(r.timestamp || "")}</td>
+      <td>${escapeHtml(r.operator || "")}</td>
+      <td><code class="admin-activity-action">${escapeHtml(r.action || "")}</code></td>
+      <td>${escapeHtml(String(r.rowIndex ?? ""))}</td>
+      <td>${escapeHtml(r.product || "")}</td>
+      <td class="admin-activity-detail" title="${escapeHtml(detailRaw)}">${detailShort || "—"}</td>
+    </tr>`;
+  }).join("");
+}
+
+async function loadInventoryAudit(options = {}) {
+  const session = getAdminSession();
+  if (!session || String(session.role).toLowerCase() !== "super_admin") {
+    inventoryAuditCache = [];
+    renderInventoryAuditTable();
+    return;
+  }
+  const { showPlaceholder = true } = options;
+  const panel = document.querySelector("#inventoryAuditPanel");
+  panel?.classList.add("is-fetching");
+  try {
+    if (showPlaceholder) {
+      const tbody = document.querySelector("#inventoryAuditTableBody");
+      if (tbody) tbody.innerHTML = '<tr><td colspan="6" class="table-empty">Loading audit log…</td></tr>';
+    }
+    setInventoryAuditMessage("");
+    const res = await adminGasRequest("getInventoryAudit", {});
+    if (res.success && Array.isArray(res.auditLog)) {
+      inventoryAuditCache = res.auditLog;
+    } else if (res.mock) {
+      inventoryAuditCache = [];
+      setInventoryAuditMessage("GAS URL not configured — audit log unavailable offline.", false);
+    } else {
+      inventoryAuditCache = [];
+      setInventoryAuditMessage(res.error || "Could not load inventory audit.", true);
+    }
+    renderInventoryAuditTable();
+  } finally {
+    panel?.classList.remove("is-fetching");
+  }
+}
+
+function setupSalesPanel() {
+  fillSalesProductSelect();
+  document.querySelector("#salesForm")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const payload = readSalesFormPayload();
+    if (!INVENTORY_PRODUCTS.includes(payload.product)) {
+      setSalesMessage("Choose a valid product.", true);
+      return;
+    }
+    if (!Number.isFinite(payload.quantitySold) || payload.quantitySold < 1) {
+      setSalesMessage("Quantity sold must be at least 1.", true);
+      return;
+    }
+    const submitBtn = document.querySelector("#salesSubmitBtn");
+    submitBtn.disabled = true;
+    submitBtn.classList.add("is-loading");
+    submitBtn.setAttribute("aria-busy", "true");
+    const idleLabel = submitBtn.textContent;
+    submitBtn.textContent = "Recording…";
+    setSalesMessage("");
+    try {
+      const res = await adminGasRequest("recordSale", payload);
+      if (res.success) {
+        document.querySelector("#salesForm")?.reset();
+        fillSalesProductSelect();
+        document.querySelector("#salesQuantity").value = "1";
+        await loadSales({ showPlaceholder: false });
+        await loadInventory({ showPlaceholder: false });
+        setSalesMessage("Sale recorded. Stock updated.");
+      } else if (res.mock) {
+        setSalesMessage("GAS not configured — cannot record sale.", true);
+      } else {
+        setSalesMessage(res.error || "Could not record sale.", true);
+      }
+    } catch (err) {
+      setSalesMessage("Could not record sale.", true);
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.classList.remove("is-loading");
+      submitBtn.removeAttribute("aria-busy");
+      submitBtn.textContent = idleLabel;
+    }
+  });
+
+  document.querySelector("#exportSalesCsvBtn")?.addEventListener("click", () => {
+    const rows = salesCache.sales || [];
+    const header = "Date,RecordedAs,Product,QuantitySold,AmountGHS,Notes";
+    const lines = rows.map((s) =>
+      [s.date, s.operator, s.product, s.quantitySold, s.amountGHS, s.notes]
+        .map((c) => `"${String(c ?? "").replaceAll('"', '""')}"`)
+        .join(",")
+    );
+    const csv = [header, ...lines].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "sales.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  document.querySelector("#printSalesBtn")?.addEventListener("click", () => {
+    const el = document.querySelector("#salesPrintDate");
+    if (el) el.textContent = `Generated ${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC`;
+    const endPrint = () => document.body.classList.remove("print-sales-only");
+    document.body.classList.add("print-sales-only");
+    window.addEventListener("afterprint", endPrint, { once: true });
+    window.print();
+  });
 }
 
 function openInventoryDeleteDialog(rowIndex) {
@@ -208,8 +523,8 @@ function setupInventoryPanel() {
     try {
       const editRow = document.querySelector("#inventoryEditRowIndex").value;
       const res = editRow
-        ? await gasRequest("updateInventoryRow", { ...payload, rowIndex: Number(editRow) })
-        : await gasRequest("addInventoryRow", payload);
+        ? await adminGasRequest("updateInventoryRow", { ...payload, rowIndex: Number(editRow) })
+        : await adminGasRequest("addInventoryRow", payload);
       if (res.success) {
         resetInventoryForm();
         await loadInventory({ showPlaceholder: false });
@@ -252,9 +567,6 @@ function setupInventoryPanel() {
       document.querySelector("#inventoryYard").value = row.yardLocation || "";
       document.querySelector("#inventoryReorder").value = row.reorderThreshold ?? 0;
       document.querySelector("#inventoryNotes").value = row.notes || "";
-      const sale = row.amountReceivedOnSale;
-      document.querySelector("#inventoryAmountSale").value =
-        sale === "" || sale == null ? "" : String(sale);
       document.querySelector("#inventoryForm")?.scrollIntoView({ behavior: "smooth", block: "start" });
       setInventoryMessage("");
     }
@@ -279,7 +591,7 @@ function setupInventoryPanel() {
     btn.setAttribute("aria-busy", "true");
     btn.textContent = "Deleting…";
     try {
-      const res = await gasRequest("deleteInventoryRow", { rowIndex, operator: getInventoryOperator() });
+      const res = await adminGasRequest("deleteInventoryRow", { rowIndex });
       closeInventoryDeleteDialog();
       if (res.success) {
         resetInventoryForm();
@@ -300,11 +612,11 @@ function setupInventoryPanel() {
 
   document.querySelector("#exportInventoryCsvBtn")?.addEventListener("click", () => {
     const rows = inventoryCache.inventory || [];
-    const header = "Product,QuantityOnHand,Unit,YardLocation,ReorderThreshold,AmountReceivedOnSale,Notes,UpdatedAt,UpdatedBy,SheetRow";
+    const header = "Product,QuantityOnHand,Unit,YardLocation,ReorderThreshold,Notes,UpdatedAt,UpdatedBy,SheetRow";
     const lines = rows.map((r) => {
       const cells = [
         r.product, r.quantityOnHand, r.unit, r.yardLocation, r.reorderThreshold,
-        r.amountReceivedOnSale, r.notes, r.updatedAt, r.updatedBy, r.rowIndex
+        r.notes, r.updatedAt, r.updatedBy, r.rowIndex
       ];
       return cells.map((c) => `"${String(c ?? "").replaceAll('"', '""')}"`).join(",");
     });
@@ -337,30 +649,56 @@ function setupInventoryPanel() {
 function setupAuth() {
   const gate = document.querySelector("#authGate");
   const app = document.querySelector("#dashboardApp");
-  if (sessionStorage.getItem("kb_admin_auth") === "true") {
-    gate.hidden = true; app.hidden = false; return initDashboard();
+  const errEl = document.querySelector("#loginError");
+  if (sessionStorage.getItem("kb_admin_auth") === "true" && !getAdminSession()) {
+    sessionStorage.removeItem("kb_admin_auth");
+  }
+  const existing = getAdminSession();
+  if (existing) {
+    gate.hidden = true;
+    app.hidden = false;
+    updateTopbarUserLabel();
+    applyAdminNavVisibility();
+    initDashboard();
+    return;
   }
   document.querySelector("#loginForm")?.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const input = document.querySelector("#adminPassword");
+    const emailInput = document.querySelector("#adminEmail");
+    const passInput = document.querySelector("#adminPassword");
     const loginBtn = document.querySelector('#loginForm button[type="submit"]');
     const idleLabel = loginBtn.textContent;
+    if (errEl) errEl.textContent = "";
     loginBtn.classList.add("is-loading");
     loginBtn.disabled = true;
     loginBtn.setAttribute("aria-busy", "true");
     loginBtn.textContent = "Signing in…";
-    const response = await gasRequest("adminLogin", { password: input.value });
-    if (response.success) {
-      sessionStorage.setItem("kb_admin_auth", "true");
-      gate.hidden = true; app.hidden = false; initDashboard();
+    const response = await gasRequest("adminLogin", {
+      email: emailInput?.value?.trim() || "",
+      password: passInput?.value || ""
+    });
+    if (response.success && response.user) {
+      setAdminSession(response.user);
+      gate.hidden = true;
+      app.hidden = false;
+      updateTopbarUserLabel();
+      applyAdminNavVisibility();
+      initDashboard();
+      loginBtn.classList.remove("is-loading");
+      loginBtn.disabled = false;
+      loginBtn.removeAttribute("aria-busy");
+      loginBtn.textContent = idleLabel;
     } else {
       loginBtn.classList.remove("is-loading");
       loginBtn.disabled = false;
       loginBtn.removeAttribute("aria-busy");
       loginBtn.textContent = idleLabel;
       document.querySelector(".login-card")?.classList.add("shake");
-      const message = response.mock ? "Set GAS URL in assets/js/main.js first." : "Incorrect password.";
-      document.querySelector("#loginError").textContent = message;
+      let message = response.error || "Sign-in failed.";
+      if (response.mock) {
+        message = "Set the GAS web app URL in assets/js/main.js before signing in.";
+      }
+      if (errEl) errEl.textContent = message;
       setTimeout(() => document.querySelector(".login-card")?.classList.remove("shake"), 300);
     }
   });
@@ -369,7 +707,7 @@ function setupAuth() {
 async function getStats(force = false) {
   const cache = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
   if (!force && cache && Date.now() - cache.timestamp < CACHE_TTL) return cache.stats;
-  const response = await gasRequest("getDashboardStats");
+  const response = await adminGasRequest("getDashboardStats", {});
   const stats = response.success ? response.stats : MOCK_STATS;
   localStorage.setItem(CACHE_KEY, JSON.stringify({ timestamp: Date.now(), stats }));
   return stats;
@@ -445,7 +783,10 @@ function setupPanels() {
     tab.classList.add("is-active");
     document.querySelector(`#${tab.dataset.panel}`)?.classList.add("is-active");
   }));
-  document.querySelector("#logoutBtn")?.addEventListener("click", () => { sessionStorage.clear(); location.reload(); });
+  document.querySelector("#logoutBtn")?.addEventListener("click", () => {
+    clearAdminSession();
+    location.reload();
+  });
 }
 
 function setupSettings() {
@@ -475,6 +816,9 @@ function setupRefresh() {
       const stats = await getStats(true);
       renderOverview(stats); renderProducts(stats); renderQuotes(stats); renderMessages(stats);
       await loadInventory({ showPlaceholder: true });
+      await loadSales({ showPlaceholder: true });
+      await loadAdminActivity({ showPlaceholder: true });
+      await loadInventoryAudit({ showPlaceholder: true });
       document.querySelector("#lastUpdated").textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
     } finally {
       setRefreshLoading(false);
@@ -504,7 +848,7 @@ function setupRowActions() {
     target.classList.add("is-loading");
     target.setAttribute("aria-busy", "true");
     try {
-      const res = await gasRequest("updateQuoteStatus", { rowIndex, status });
+      const res = await adminGasRequest("updateQuoteStatus", { rowIndex, status });
       if (!res.success) {
         const stats = await getStats(true);
         renderQuotes(stats);
@@ -524,7 +868,7 @@ function setupRowActions() {
     target.setAttribute("aria-busy", "true");
     target.textContent = "Updating…";
     try {
-      const res = await gasRequest("markMessageRead", { rowIndex: Number(target.dataset.messageRow) });
+      const res = await adminGasRequest("markMessageRead", { rowIndex: Number(target.dataset.messageRow) });
       if (res.success) {
         target.closest("tr")?.classList.remove("unread");
         target.remove();
@@ -550,11 +894,15 @@ async function initDashboard() {
   setupCSVExport();
   setupRowActions();
   setupInventoryPanel();
+  setupSalesPanel();
   setRefreshLoading(true);
   try {
     const stats = await getStats();
     renderOverview(stats); renderProducts(stats); renderQuotes(stats); renderMessages(stats);
     await loadInventory({ showPlaceholder: true });
+    await loadSales({ showPlaceholder: true });
+    await loadAdminActivity({ showPlaceholder: true });
+    await loadInventoryAudit({ showPlaceholder: true });
   } finally {
     setRefreshLoading(false);
   }
